@@ -76,6 +76,12 @@ export function parseFormattedText(text: string, options?: IFormattingOptions): 
         ]);
     }
 
+    // A pronunciation guide marker can be split across formatting tags (e.g. the ”) end marker can come through as
+    // ”<b><em>) when the closing quote and parenthesis have different formatting in the source document). The marker
+    // is only matched as a contiguous string below, so without this the guide would never close and the rest of the
+    // question would be treated as pronunciation text. Pull the tags out so the marker's characters are adjacent.
+    text = joinTagSeparatedMarkers(text, pronunciationGuideMarkers);
+
     const readerDirectives: string[] | undefined = options.readerDirectives ?? defaultReaderDirectives;
 
     let bolded = false;
@@ -317,6 +323,52 @@ export function splitFormattedTextIntoWords(text: string, options?: IFormattingO
     }
 
     return splitFormattedText;
+}
+
+// Matches a single formatting tag (e.g. <b>, </em>). Kept in sync with the tags handled in parseFormattedText.
+const formattingTagPattern = "<\\/?(?:em|req|b|u|sub|sup)>";
+
+/**
+ * Moves formatting tags out from between the characters of a pronunciation guide marker so that the marker's
+ * characters are contiguous. For example, `”<b><em>)` becomes `<b><em>”)` for the `”)` marker. The tags are placed
+ * in front of the marker so that the formatting state of the text following the marker is preserved.
+ * @param text The text to fix up.
+ * @param markers The pronunciation guide marker pairs to look for.
+ * @returns The text with any tag-separated markers joined back together.
+ */
+function joinTagSeparatedMarkers(text: string, markers: [string, string][]): string {
+    const uniqueMarkers = new Set<string>();
+    for (const [start, end] of markers) {
+        uniqueMarkers.add(start);
+        uniqueMarkers.add(end);
+    }
+
+    const tagRegExp = new RegExp(formattingTagPattern, "gi");
+    for (const marker of uniqueMarkers) {
+        // Single-character markers can't be split apart by tags.
+        if (marker.length < 2) {
+            continue;
+        }
+
+        // Build a pattern that matches the marker even when formatting tags appear between its characters.
+        const characters: string[] = [...marker].map(escapeRegExp);
+        let pattern: string = characters[0];
+        for (let i = 1; i < characters.length; i++) {
+            pattern += `(?:${formattingTagPattern})*${characters[i]}`;
+        }
+
+        text = text.replace(new RegExp(pattern, "gi"), (match) => {
+            const tags: RegExpMatchArray | null = match.match(tagRegExp);
+            if (tags == null) {
+                // The marker was already contiguous, so leave it alone.
+                return match;
+            }
+
+            return tags.join("") + match.replace(tagRegExp, "");
+        });
+    }
+
+    return text;
 }
 
 // Taken from https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_Expressions#escaping

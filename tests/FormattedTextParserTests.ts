@@ -704,6 +704,52 @@ describe("FormattedTextParserTests", () => {
                 },
             ]);
         });
+        it("Pronunciation guide end marker split across formatting tags", () => {
+            // Regression test for Round_01 tossup 10: the closing ”) marker came through as ”<b><em>) because the
+            // quote and parenthesis had different formatting in the source document. Previously this left the
+            // pronunciation flag stuck on, graying out (and disabling buzzing for) the rest of the question.
+            const textToFormat =
+                "<b>squamocolumnar </b>(“<b><em>SKWAY-mo-kuh-LUM-nar</em></b>”<b><em>)</em> junction</b>";
+            const result: IFormattedText[] = FormattedTextParser.parseFormattedText(textToFormat, {
+                pronunciationGuideMarkers: GameFormats.ACFGameFormat.pronunciationGuideMarkers,
+            });
+
+            // The guide should be exactly the parenthetical, and nothing after it.
+            const guideText: string = result
+                .filter((slice) => slice.pronunciation)
+                .map((slice) => slice.text)
+                .join("");
+            expect(guideText).to.equal("(“SKWAY-mo-kuh-LUM-nar”)");
+
+            // The text after the guide must be buzzable (not pronunciation) and keep its bold power formatting.
+            const junction: IFormattedText | undefined = result.find((slice) => slice.text.includes("junction"));
+            expect(junction, "expected a slice containing 'junction'").to.not.be.undefined;
+            expect(junction?.pronunciation).to.equal(false);
+            expect(junction?.bolded).to.equal(true);
+        });
+        it("No pronunciation guide is longer than 100 characters", () => {
+            // Round_01 tossup 10. With a broken end marker the pronunciation flag stays on for hundreds of
+            // characters; a correctly parsed guide is short, so cap the length of any single guide.
+            const textToFormat =
+                "<b>Two types of epithelium in this structure meet at the squamocolumnar </b>(“<b><em>SKWAY-mo-kuh-LUM-nar</em></b>”<b><em>)</em> junction, whose motion during development creates the transformation zone. It’s not the thyroid, but the Bethesda system is used to identify L·S·I·L and H·S·I·L lesions in this structure. Abnormal cells turn white upon applying acetic acid to this structure when it is examined during a colposcopy </b>(“<b><em>call-PAH-skoh-pee</em></b>”<b><em>)</em>. The first (*) </b>immortal human cell line, extracted from Henrietta Lacks, came from a cancer in this structure. The vaccine Gardasil (“GAR-dih-sil”) protects against HPV infection of this structure, whose abnormal cells are detected in a Pap smear. This structure dilates up to ten centimeters during labor. For 10 points, name this neck-like structure between the vagina and uterus.";
+            const result: IFormattedText[] = FormattedTextParser.parseFormattedText(textToFormat, {
+                pronunciationGuideMarkers: GameFormats.ACFGameFormat.pronunciationGuideMarkers,
+            });
+
+            // Walk the slices and measure the length of each maximal run of pronunciation text.
+            let longestGuideLength = 0;
+            let currentGuideLength = 0;
+            for (const slice of result) {
+                if (slice.pronunciation) {
+                    currentGuideLength += slice.text.length;
+                    longestGuideLength = Math.max(longestGuideLength, currentGuideLength);
+                } else {
+                    currentGuideLength = 0;
+                }
+            }
+
+            expect(longestGuideLength).to.be.lessThan(100);
+        });
     });
     describe("splitFormattedTextIntoWords", () => {
         it("No tags", () => {
